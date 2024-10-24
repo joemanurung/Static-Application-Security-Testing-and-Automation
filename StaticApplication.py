@@ -1,69 +1,82 @@
+import os
 import subprocess
 import json
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.lib import colors
+from fpdf import FPDF
 
-# Function to run Semgrep scan on the specified directory
-def run_semgrep_scan(directory):
+def run_semgrep(directory):
+    """
+    Run Semgrep on the specified directory and return the results in JSON format.
+    """
     try:
-        # Running semgrep scan and capturing output as JSON
+        # Run semgrep scan
         result = subprocess.run(
             ['semgrep', '--config', 'auto', '--json', directory],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
-        # Return the JSON result
+        if result.returncode != 0:
+            print(f"Error running semgrep: {result.stderr}")
+            return None
+        
         return json.loads(result.stdout)
     except Exception as e:
-        print(f"Error running Semgrep: {e}")
+        print(f"An error occurred: {e}")
         return None
 
-# Function to create a PDF report from the semgrep results
-def create_pdf_report(scan_results, output_file):
-    c = canvas.Canvas(output_file, pagesize=letter)
-    width, height = letter
-    c.setFont("Helvetica", 12)
-    c.drawString(100, height - 50, "Semgrep Scan Report")
+def generate_pdf_report(vulnerabilities, output_file):
+    """
+    Generate a PDF report from the semgrep vulnerability results.
+    """
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
 
-    y_position = height - 100
-    c.setFont("Helvetica", 10)
+    # Title
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(200, 10, txt="Static Application Security Testing (SAST) Report", ln=True, align='C')
 
-    for result in scan_results.get('results', []):
-        if y_position < 50:
-            c.showPage()
-            y_position = height - 50
-        c.setFillColor(colors.red)
-        c.drawString(100, y_position, f"File: {result['path']}")
-        y_position -= 20
-        c.setFillColor(colors.black)
-        c.drawString(120, y_position, f"Rule: {result['check_id']}")
-        y_position -= 20
-        c.drawString(120, y_position, f"Message: {result['extra']['message']}")
-        y_position -= 20
-        c.drawString(120, y_position, f"Line: {result['start']['line']}")
-        y_position -= 30
+    pdf.ln(10)  # Add space
 
-    c.save()
-    print(f"PDF report created: {output_file}")
+    # Vulnerabilities Section
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(200, 10, txt="Vulnerabilities Found:", ln=True)
 
-# Main function to run the scan and generate PDF
-def main():
-    # Specify the directory to scan
-    directory_to_scan = input("Enter the directory to scan with Semgrep: ")
-    output_pdf = "semgrep_scan_report.pdf"
-
-    # Run the Semgrep scan
-    print("Running Semgrep scan...")
-    scan_results = run_semgrep_scan(directory_to_scan)
-
-    if scan_results:
-        # Create PDF report
-        print("Creating PDF report...")
-        create_pdf_report(scan_results, output_pdf)
+    pdf.set_font("Arial", size=12)
+    if not vulnerabilities:
+        pdf.cell(200, 10, txt="No vulnerabilities found.", ln=True)
     else:
-        print("No results from Semgrep scan.")
+        for index, vuln in enumerate(vulnerabilities, start=1):
+            pdf.ln(8)  # Add space between vulnerabilities
+            pdf.cell(200, 10, txt=f"{index}. {vuln['check_id']}", ln=True)
+            pdf.cell(200, 10, txt=f"   Severity: {vuln['extra']['severity']}", ln=True)
+            pdf.cell(200, 10, txt=f"   Message: {vuln['extra']['message']}", ln=True)
+            pdf.cell(200, 10, txt=f"   File: {vuln['path']}", ln=True)
+            pdf.cell(200, 10, txt=f"   Line: {vuln['start']['line']}", ln=True)
+
+    # Output the PDF
+    pdf.output(output_file)
+
+def main(directory, output_file):
+    # Step 1: Run Semgrep on the specified directory
+    print(f"Scanning directory: {directory}")
+    scan_results = run_semgrep(directory)
+
+    if not scan_results:
+        print("No results from the scan. Exiting.")
+        return
+
+    # Step 2: Extract vulnerabilities from Semgrep results
+    vulnerabilities = scan_results.get('results', [])
+
+    # Step 3: Generate the PDF report
+    print(f"Generating PDF report: {output_file}")
+    generate_pdf_report(vulnerabilities, output_file)
+
+    print(f"Report generated: {output_file}")
 
 if __name__ == "__main__":
-    main()
+    directory_to_scan = input("Enter the directory to scan: ")
+    output_pdf_file = input("Enter the output PDF file name (e.g., report.pdf): ")
+    
+    main(directory_to_scan, output_pdf_file)
